@@ -1,0 +1,13 @@
+/* Hide the native Webapp3 chat button 
+button[data-testid="button-chat"], 
+.button-chat,
+[id*="button-chat"] {
+    display: none !important;
+}
+
+/* Note: The exact class name may vary slightly based on your Pexip version
+.participant-list-footer button.add-participant-btn, 
+[data-testid="add-participant-button"] {
+    display: none !important;
+}
+*/
