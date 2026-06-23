@@ -73,6 +73,8 @@ window.addEventListener('message', (event) => {
   const { action, ...data } = event.data ?? {};
   switch (action) {
     case 'pexip:plugin:external-chat/ready':            /* plugin is loaded */ break;
+    case 'pexip:plugin:external-chat/connected':        /* user joined the call */ break;
+    case 'pexip:plugin:external-chat/disconnected':     /* data.userInitiated, data.error, data.errorCode */ break;
     case 'pexip:plugin:external-chat/toggle-chat':      /* data.active */      break;
     case 'pexip:plugin:external-chat/dial-out-success': /* data.uuid, data.displayName */ break;
     case 'pexip:plugin:external-chat/dial-out-error':   /* data.message */     break;
@@ -82,7 +84,9 @@ window.addEventListener('message', (event) => {
 
 | Action | Payload | When |
 | --- | --- | --- |
-| `pexip:plugin:external-chat/ready` | _(none)_ | Plugin finished loading and registering. |
+| `pexip:plugin:external-chat/ready` | _(none)_ | Plugin finished loading and registering (before the user joins). |
+| `pexip:plugin:external-chat/connected` | _(none)_ | User joined the call (passed preflight); the in-meeting toolbar and Chat button are now visible/accessible. |
+| `pexip:plugin:external-chat/disconnected` | `{ userInitiated: boolean, error?: string, errorCode?: string }` | User left or lost the call; the toolbar is no longer available. `userInitiated` is `true` when the user clicked **Leave**, `false` for an involuntary drop (in which case `error`/`errorCode` are set). |
 | `pexip:plugin:external-chat/toggle-chat` | `{ active: boolean }` | User clicked the Chat toolbar button. `active` is the **requested** state (the opposite of the current one). |
 | `pexip:plugin:external-chat/dial-out-success` | `{ uuid: string, displayName?: string }` | A `dial-out` request succeeded; the dialed participant joined. |
 | `pexip:plugin:external-chat/dial-out-error` | `{ message: string }` | A `dial-out` request failed. |

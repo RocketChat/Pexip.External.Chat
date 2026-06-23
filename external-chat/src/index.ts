@@ -70,6 +70,23 @@ button.onClick.add(() => {
   fireParentMessage('toggle-chat', { active: !isChatAtive });
 })
 
+// Fired once the user has joined the call (passed preflight) and the in-meeting
+// toolbar — including the Chat button — is visible and accessible.
+plugin.events.connected.add(() => {
+  fireParentMessage('connected');
+});
+
+// Fired when the call drops involuntarily (error / server-side disconnect).
+plugin.events.disconnected.add((payload) => {
+  fireParentMessage('disconnected', { userInitiated: false, ...payload });
+});
+
+// Fired when the user explicitly clicks "Leave". Web App 3 emits this instead of
+// `disconnected` for user-initiated leaves, so we forward both as `disconnected`.
+plugin.events.userInitiatedDisconnect.add(() => {
+  fireParentMessage('disconnected', { userInitiated: true });
+});
+
 // Listen for the parent window telling us when to show/hide the unread badge.
 window.addEventListener('message', (event: MessageEvent) => {
   // Only react to messages from the top window (the page embedding Web App 3),
