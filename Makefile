@@ -6,26 +6,33 @@ DIST        := $(PROJECT)/dist
 WEBAPP3     := $(ROOT)/webapp3
 PLUGIN_DIR  := $(WEBAPP3)/branding/plugins/external-chat
 
-.PHONY: all bump build deploy package clean
+.PHONY: all release bump build deploy package clean
 
-all: package
+# Default: a full release (bumps the version, then packages).
+all: release
 
-# 1. Bump the minor version in external-chat/package.json (no git commit/tag).
-#    Done first so the build embeds the new version in its logs.
+# Full release: bump the minor version first, then build & package with it.
+# Uses sub-makes so the bump always completes before the build starts.
+release:
+	$(MAKE) bump
+	$(MAKE) package
+
+# Bump the minor version in external-chat/package.json (no git commit/tag).
 bump:
 	cd $(PROJECT) && npm version minor --no-git-tag-version
 
-# 2. Build the external-chat project.
-build: bump
+# Build the external-chat project.
+build:
 	cd $(PROJECT) && npm run build
 
-# 3. Copy the freshly built dist into webapp3/branding/plugins/external-chat.
+# Copy the freshly built dist into webapp3/branding/plugins/external-chat.
 deploy: build
 	rm -rf $(PLUGIN_DIR)
 	mkdir -p $(PLUGIN_DIR)
 	cp -R $(DIST)/. $(PLUGIN_DIR)/
 
-# 4. Zip the webapp3 bundle into external-chat-v<version>.zip, named from package.json.
+# Zip the webapp3 bundle into external-chat-v<version>.zip using the CURRENT
+# version from package.json (no bump). This is what CI calls.
 package: deploy
 	@VERSION=$$(node -p "require('$(PROJECT)/package.json').version"); \
 	cd $(ROOT) && zip -r -q external-chat-v$$VERSION.zip webapp3 -x '*.DS_Store'; \
