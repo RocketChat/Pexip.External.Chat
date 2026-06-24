@@ -187,33 +187,60 @@ plugin at runtime (`plugin: external-chat loaded v<version>`).
 
 ## Building & packaging with the Makefile
 
-Run all `make` commands from the **repository root**. The pipeline bumps the
-version, builds the plugin, copies it into the branding bundle, and produces a
-versioned zip.
+Run all `make` commands from the **repository root**.
 
 ```bash
-make            # same as `make package` — runs the full pipeline
+make            # full release: bump the minor version, build, then package
+make package    # build & package using the CURRENT version (no bump)
 ```
 
 ### Targets
 
-| Target | What it does |
-| --- | --- |
-| `make bump` | Bumps the **minor** version in `external-chat/package.json` (`npm version minor --no-git-tag-version` — no git commit or tag). |
-| `make build` | Runs `bump`, then `npm run build` so the new version is embedded in the bundle. |
-| `make deploy` | Runs `build`, then copies `external-chat/dist/` into `webapp3/branding/plugins/external-chat/`. |
-| `make package` | Runs `deploy`, then zips the `webapp3/` folder into `external-chat-v<version>.zip` at the repo root. |
-| `make all` | Alias for `make package` (the default target). |
-| `make clean` | Removes `external-chat/dist/` and the deployed plugin folder. |
+| Target | What it does | Bumps version? |
+| --- | --- | --- |
+| `make release` | Bumps the version, then runs `package`. | ✅ |
+| `make all` | Alias for `make release` (the default target). | ✅ |
+| `make bump` | Bumps the **minor** version in `external-chat/package.json` (`npm version minor --no-git-tag-version` — no git commit or tag). | ✅ |
+| `make build` | Runs `npm run build`. | — |
+| `make deploy` | Runs `build`, then copies `external-chat/dist/` into `webapp3/branding/plugins/external-chat/`. | — |
+| `make package` | Runs `deploy`, then zips the `webapp3/` folder into `external-chat-v<version>.zip` at the repo root, using the current `package.json` version. | — |
+| `make clean` | Removes `external-chat/dist/` and the deployed plugin folder. | — |
 
-Dependency chain: `package → deploy → build → bump`.
+Dependency chains: `release → bump → package → deploy → build`. Only `release`,
+`all`, and `bump` change the version — `build`/`deploy`/`package` use the current
+one, so **CI and one-off packaging never bump** (CI runs `make package`).
 
 ### Output
 
 `make` produces `external-chat-v<version>.zip` in the repo root, where `<version>`
-is the freshly bumped value from `package.json` (e.g. `external-chat-v1.4.0.zip`).
-The zip contains the full `webapp3/` branding bundle, ready to upload.
+is the value in `package.json` (e.g. `external-chat-v1.4.0.zip`) — freshly bumped
+by `make`/`make release`, or unchanged by `make package`. The zip contains the
+full `webapp3/` branding bundle, ready to upload.
 
-> ⚠️ **Every `make` (or `make build`/`deploy`/`package`) bumps the minor version**,
-> because `build` depends on `bump`. To build *without* bumping, run
-> `cd external-chat && npm run build` directly and copy `dist/` yourself.
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on pushes to `main`, on pull requests, and on
+manual dispatch. It installs dependencies (`npm ci`), then runs **lint**,
+**typecheck** (`tsc --noEmit`), and **`make package`** (build + zip, **no version
+bump**). The resulting `external-chat-v<version>.zip` is uploaded as a downloadable
+workflow artifact named `external-chat-v<version>`.
+
+## Releasing
+
+`.github/workflows/release.yml` is a **manually triggered** workflow
+(Actions → *Release* → *Run workflow*). It reads the current version from
+`external-chat/package.json`, builds the zip (`make package`, no bump), then
+creates a `v<version>` git tag and a GitHub release with
+`external-chat-v<version>.zip` attached as an asset. Release notes are
+auto-generated from the changes since the previous release.
+
+Typical flow:
+
+```bash
+make bump                 # 1. bump the minor version in package.json
+git commit -am "release"  # 2. commit the bump (and push)
+# 3. run the "Release" workflow from the Actions tab
+```
+
+If a release for the current version already exists, the workflow fails with a
+reminder to bump first (it never overwrites an existing tag/release).

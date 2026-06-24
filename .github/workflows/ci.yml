@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Lint, typecheck & package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: external-chat/package-lock.json
+
+      - name: Install dependencies
+        working-directory: external-chat
+        run: npm ci
+
+      - name: Lint
+        working-directory: external-chat
+        run: npm run lint
+
+      - name: Typecheck
+        working-directory: external-chat
+        run: npx tsc --noEmit
+
+      - name: Build & package the zip (no version bump)
+        run: |
+          make package
+          VERSION=$(node -p "require('./external-chat/package.json').version")
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Upload plugin zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: external-chat-v${{ env.VERSION }}
+          path: external-chat-v${{ env.VERSION }}.zip
+          if-no-files-found: error

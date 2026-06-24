@@ -1,0 +1,56 @@
+name: Release
+
+# Manually-triggered release: reads the current version from package.json,
+# builds the plugin zip, then creates a matching git tag and GitHub release
+# with the zip attached as an asset. Bump the version (e.g. `make bump`) and
+# commit it before running this.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write # required to create tags and releases
+
+jobs:
+  release:
+    name: Tag & release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: external-chat/package-lock.json
+
+      - name: Install dependencies
+        working-directory: external-chat
+        run: npm ci
+
+      - name: Read version from package.json
+        run: echo "VERSION=$(node -p "require('./external-chat/package.json').version")" >> "$GITHUB_ENV"
+
+      - name: Ensure this version is not already released
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "::error::Release v$VERSION already exists. Bump the version in external-chat/package.json first."
+            exit 1
+          fi
+
+      - name: Build & package the zip
+        run: make package
+
+      - name: Create tag & GitHub release with the zip asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION" \
+            "external-chat-v$VERSION.zip" \
+            --target "$GITHUB_SHA" \
+            --title "external-chat v$VERSION" \
+            --generate-notes

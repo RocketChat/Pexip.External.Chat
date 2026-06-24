@@ -1,7 +1,8 @@
-import { ButtonRPCPayload, registerPlugin } from '@pexip/plugin-api'
+import { registerPlugin } from '@pexip/plugin-api'
+import type { ButtonRPCPayload } from '@pexip/plugin-api'
 import { version } from '../package.json'
 
-function fireParentMessage(action: string, data?: Record<string, unknown>) {
+function fireParentMessage(action: string, data?: Record<string, unknown>): void {
   action = `pexip:plugin:external-chat/${action}`;
 
   console.log(`plugin: external-chat sending message to parent: ${action}`, data);
@@ -26,8 +27,8 @@ const buttonConfig: ButtonRPCPayload['toolbar']['add'] = {
 
 const button = await plugin.ui.addButton(buttonConfig);
 
-function renderButton() {
-  button.update({
+function renderButton(): void {
+  void button.update({
     ...buttonConfig,
     isActive: isChatAtive,
     tooltip: isChatAtive ? 'Close Chat' : 'Open Chat',
@@ -37,12 +38,12 @@ function renderButton() {
   });
 }
 
-function setChatActive(isActive: boolean) {
+function setChatActive(isActive: boolean): void {
   isChatAtive = isActive;
   renderButton();
 }
 
-function setBadgeVisible(isVisible: boolean) {
+function setBadgeVisible(isVisible: boolean): void {
   isBadgeVisible = isVisible;
   renderButton();
 }
@@ -51,7 +52,7 @@ function setBadgeVisible(isVisible: boolean) {
 type DialOutParams = Parameters<typeof plugin.conference.dialOut>[0];
 
 // Dial out to a destination on behalf of the top window and report the outcome back.
-async function dialOut(params: DialOutParams) {
+async function dialOut(params: DialOutParams): Promise<void> {
   try {
     const participant = await plugin.conference.dialOut(params);
     fireParentMessage('dial-out-success', {
