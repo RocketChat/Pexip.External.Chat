@@ -2,7 +2,9 @@
 
 A [Pexip Web App 3](https://developer.pexip.com/docs/plugins/webapp-3/introduction)
 plugin that adds a **Chat** toolbar button and bridges the meeting to an external
-chat experience hosted by the page that embeds Web App 3 (the *top window*).
+chat experience hosted by the page that embeds Web App 3 (the *top window*) —
+Rocket.Chat's conference window, whose `useProviderPlugin` is the other half of
+the protocol below.
 
 The plugin and the top window communicate over `window.postMessage`. The plugin
 also exposes the Web App 3 `conference.dialOut` capability so the top window can
@@ -48,11 +50,17 @@ All messages — in both directions — share a single envelope: a flat object w
 an `action` string plus any payload fields alongside it.
 
 ```js
-{ action: 'pexip:plugin:external-chat/<name>', ...payloadFields }
+{ action: 'rocketchat:videoconf/<name>', ...payloadFields }
 ```
 
-Every `action` is namespaced with the `pexip:plugin:external-chat/` prefix.
-Messages without that prefix are ignored (and logged as a warning).
+Every `action` is namespaced with the `rocketchat:videoconf/` prefix. Messages
+without that prefix are ignored (and logged as a warning).
+
+The namespace is the host's rather than Pexip's on purpose: the protocol belongs
+to the page that hosts the chat, so a plugin for another video provider sending
+these same actions gets the same behaviour from that page with nothing new on its
+side. Unknown actions are ignored at both ends, so either half can learn a new
+message without breaking the other.
 
 ### Security
 
@@ -72,29 +80,30 @@ window.addEventListener('message', (event) => {
   if (event.source !== document.querySelector('iframe#webapp3')?.contentWindow) return;
   const { action, ...data } = event.data ?? {};
   switch (action) {
-    case 'pexip:plugin:external-chat/ready':            /* plugin is loaded */ break;
-    case 'pexip:plugin:external-chat/connected':        /* user joined the call */ break;
-    case 'pexip:plugin:external-chat/disconnected':     /* data.userInitiated, data.error, data.errorCode */ break;
-    case 'pexip:plugin:external-chat/toggle-chat':      /* data.active */      break;
-    case 'pexip:plugin:external-chat/dial-out-success': /* data.uuid, data.displayName */ break;
-    case 'pexip:plugin:external-chat/dial-out-error':   /* data.message */     break;
+    case 'rocketchat:videoconf/ready':            /* plugin is loaded */ break;
+    case 'rocketchat:videoconf/connected':        /* user joined the call */ break;
+    case 'rocketchat:videoconf/disconnected':     /* data.userInitiated, data.error, data.errorCode */ break;
+    case 'rocketchat:videoconf/toggle-chat':      /* data.active */      break;
+    case 'rocketchat:videoconf/dial-out-success': /* data.uuid, data.displayName */ break;
+    case 'rocketchat:videoconf/dial-out-error':   /* data.message */     break;
   }
 });
 ```
 
 | Action | Payload | When |
 | --- | --- | --- |
-| `pexip:plugin:external-chat/ready` | _(none)_ | Plugin finished loading and registering (before the user joins). |
-| `pexip:plugin:external-chat/connected` | _(none)_ | User joined the call (passed preflight); the in-meeting toolbar and Chat button are now visible/accessible. |
-| `pexip:plugin:external-chat/disconnected` | `{ userInitiated: boolean, error?: string, errorCode?: string }` | User left or lost the call; the toolbar is no longer available. `userInitiated` is `true` when the user clicked **Leave**, `false` for an involuntary drop (in which case `error`/`errorCode` are set). |
-| `pexip:plugin:external-chat/toggle-chat` | `{ active: boolean }` | User clicked the Chat toolbar button. `active` is the **requested** state (the opposite of the current one). |
-| `pexip:plugin:external-chat/dial-out-success` | `{ uuid: string, displayName?: string }` | A `dial-out` request succeeded; the dialed participant joined. |
-| `pexip:plugin:external-chat/dial-out-error` | `{ message: string }` | A `dial-out` request failed. |
+| `rocketchat:videoconf/ready` | _(none)_ | Plugin finished loading and registering (before the user joins). |
+| `rocketchat:videoconf/connected` | _(none)_ | User joined the call (passed preflight); the in-meeting toolbar and Chat button are now visible/accessible. |
+| `rocketchat:videoconf/disconnected` | `{ userInitiated: boolean, error?: string, errorCode?: string }` | User left or lost the call; the toolbar is no longer available. `userInitiated` is `true` when the user clicked **Leave**, `false` for an involuntary drop (in which case `error`/`errorCode` are set). |
+| `rocketchat:videoconf/toggle-chat` | `{ active: boolean }` | User clicked the Chat toolbar button. `active` is the **requested** state (the opposite of the current one). |
+| `rocketchat:videoconf/dial-out-success` | `{ uuid: string, displayName?: string }` | A `dial-out` request succeeded; the dialed participant joined. |
+| `rocketchat:videoconf/dial-out-error` | `{ message: string }` | A `dial-out` request failed. |
 
 > **Note:** Clicking the toolbar button only *notifies* the top window via
 > `toggle-chat`. The button's active/tooltip state does **not** change on its own —
-> the top window is the source of truth and must echo back
-> `toggle-chat-button-state` (below) to update the button.
+> the top window is the source of truth and must send `chat-state` (below) to
+> update the button. It sends it whenever its panel changes, however it changed, so
+> the button follows a panel closed from the host's own UI too.
 
 ---
 
@@ -105,16 +114,16 @@ Send these from the top window to the Web App 3 iframe:
 ```js
 const iframe = document.querySelector('iframe#webapp3');
 iframe.contentWindow.postMessage({
-  action: 'pexip:plugin:external-chat/toggle-chat-badge',
-  visible: true,
+  action: 'rocketchat:videoconf/chat-unread',
+  unread: true,
 }, '*'); // use the Web App 3 origin instead of '*' in production
 ```
 
 | Action | Payload | Effect |
 | --- | --- | --- |
-| `pexip:plugin:external-chat/toggle-chat-button-state` | `{ active: boolean }` | Sets the Chat button's active state and tooltip (`Close Chat` / `Open Chat`). |
-| `pexip:plugin:external-chat/toggle-chat-badge` | `{ visible: boolean }` | Shows or hides the unread badge on the Chat button. |
-| `pexip:plugin:external-chat/dial-out` | _dial parameters (see below)_ | Dials a destination into the conference via `conference.dialOut`. Replies with `dial-out-success` / `dial-out-error`. |
+| `rocketchat:videoconf/chat-state` | `{ active: boolean }` | The host's chat panel is open or closed. Sets the Chat button's active state and tooltip (`Close Chat` / `Open Chat`). |
+| `rocketchat:videoconf/chat-unread` | `{ unread: boolean }` | The host's chat panel has unread messages, or no longer does. Shown here as a badge on the Chat button. |
+| `rocketchat:videoconf/dial-out` | _dial parameters (see below)_ | Dials a destination into the conference via `conference.dialOut`. Replies with `dial-out-success` / `dial-out-error`. |
 
 #### `dial-out` parameters
 
@@ -139,7 +148,7 @@ Example:
 
 ```js
 iframe.contentWindow.postMessage({
-  action: 'pexip:plugin:external-chat/dial-out',
+  action: 'rocketchat:videoconf/dial-out',
   role: 'GUEST',
   destination: 'alice@example.com',
   protocol: 'sip',

@@ -2,8 +2,12 @@ import { registerPlugin } from '@pexip/plugin-api'
 import type { ButtonRPCPayload } from '@pexip/plugin-api'
 import { version } from '../package.json'
 
+// The protocol belongs to the page that hosts the chat, not to Pexip, so the namespace is Rocket.Chat's: any
+// provider plugin sending these actions gets the same behaviour out of its call window.
+const NAMESPACE = 'rocketchat:videoconf';
+
 function fireParentMessage(action: string, data?: Record<string, unknown>): void {
-  action = `pexip:plugin:external-chat/${action}`;
+  action = `${NAMESPACE}/${action}`;
 
   console.log(`plugin: external-chat sending message to parent: ${action}`, data);
   window.top?.postMessage({ action, ...data }, '*');
@@ -102,7 +106,7 @@ window.addEventListener('message', (event: MessageEvent) => {
 
   const {action, ...data} = event.data as ({ action: string; } & Record<string, any>);
 
-  if (!action?.startsWith('pexip:plugin:external-chat/')) {
+  if (!action?.startsWith(`${NAMESPACE}/`)) {
     console.warn('plugin: external-chat received unknown message from parent:', data);
     return;
   }
@@ -110,11 +114,13 @@ window.addEventListener('message', (event: MessageEvent) => {
   console.log(`plugin: external-chat receiving message from parent: ${action}`, data);
 
   switch (action.split('/').slice(-1)[0]) {
-    case 'toggle-chat-button-state':
+    // The state of the host's chat panel, which is the source of truth for this button: clicking it only asks.
+    case 'chat-state':
       setChatActive(data.active === true);
       break;
-    case 'toggle-chat-badge':
-      setBadgeVisible(data.visible === true);
+    // Whether that panel has anything unread. What it looks like here is this plugin's business — a badge.
+    case 'chat-unread':
+      setBadgeVisible(data.unread === true);
       break;
     case 'dial-out':
       void dialOut({
