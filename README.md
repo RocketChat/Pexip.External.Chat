@@ -6,9 +6,11 @@ chat experience hosted by the page that embeds Web App 3 (the *top window*) —
 Rocket.Chat's conference window, whose `useProviderPlugin` is the other half of
 the protocol below.
 
-The plugin and the top window communicate over `window.postMessage`. The plugin
-also exposes the Web App 3 `conference.dialOut` capability so the top window can
-dial participants into the meeting.
+The plugin and the top window communicate over `window.postMessage`. Beyond the
+chat bridge, the plugin publishes the meeting's participant roster and the local
+user's own state, and exposes Web App 3's conference controls — mute, admit,
+disconnect, spotlight, raised hands, role changes, transfers, DTMF and dial-out — so the top
+window can render a participants panel of its own.
 
 ```
 ┌──────────────────────────────┐
@@ -80,10 +82,12 @@ window.addEventListener('message', (event) => {
   if (event.source !== document.querySelector('iframe#webapp3')?.contentWindow) return;
   const { action, ...data } = event.data ?? {};
   switch (action) {
-    case 'rocketchat:videoconf/ready':            /* plugin is loaded */ break;
+    case 'rocketchat:videoconf/ready':            /* data.features */    break;
     case 'rocketchat:videoconf/connected':        /* user joined the call */ break;
     case 'rocketchat:videoconf/disconnected':     /* data.userInitiated, data.error, data.errorCode */ break;
     case 'rocketchat:videoconf/toggle-chat':      /* data.active */      break;
+    case 'rocketchat:videoconf/self':             /* the local user's state */ break;
+    case 'rocketchat:videoconf/roster':           /* data.participants */ break;
     case 'rocketchat:videoconf/dial-out-success': /* data.uuid, data.displayName */ break;
     case 'rocketchat:videoconf/dial-out-error':   /* data.message */     break;
   }
@@ -92,10 +96,12 @@ window.addEventListener('message', (event) => {
 
 | Action | Payload | When |
 | --- | --- | --- |
-| `rocketchat:videoconf/ready` | _(none)_ | Plugin finished loading and registering (before the user joins). |
+| `rocketchat:videoconf/ready` | `{ features: Feature[] }` | Plugin finished loading and registering (before the user joins). The **capability announcement** — see [Features](#features). |
 | `rocketchat:videoconf/connected` | _(none)_ | User joined the call (passed preflight); the in-meeting toolbar and Chat button are now visible/accessible. |
 | `rocketchat:videoconf/disconnected` | `{ userInitiated: boolean, error?: string, errorCode?: string }` | User left or lost the call; the toolbar is no longer available. `userInitiated` is `true` when the user clicked **Leave**, `false` for an involuntary drop (in which case `error`/`errorCode` are set). |
 | `rocketchat:videoconf/toggle-chat` | `{ active: boolean }` | User clicked the Chat toolbar button. `active` is the **requested** state (the opposite of the current one). |
+| `rocketchat:videoconf/self` | `{ participantUuid: string, micMuted: boolean, camMuted: boolean, clientMuted: boolean, isHost: boolean, canControl: boolean }` | The local user's own state changed. `micMuted` is the conference's mute of them; `clientMuted` is what their own mic button did. |
+| `rocketchat:videoconf/roster` | `{ participants: PluginParticipant[] }` | Anybody joined, left, or changed. The **whole** list goes out every time — see [PluginParticipant](#pluginparticipant). |
 | `rocketchat:videoconf/dial-out-success` | `{ uuid: string, displayName?: string }` | A `dial-out` request succeeded; the dialed participant joined. |
 | `rocketchat:videoconf/dial-out-error` | `{ message: string }` | A `dial-out` request failed. |
 
@@ -123,7 +129,29 @@ iframe.contentWindow.postMessage({
 | --- | --- | --- |
 | `rocketchat:videoconf/chat-state` | `{ active: boolean }` | The host's chat panel is open or closed. Sets the Chat button's active state and tooltip (`Close Chat` / `Open Chat`). |
 | `rocketchat:videoconf/chat-unread` | `{ unread: boolean }` | The host's chat panel has unread messages, or no longer does. Shown here as a badge on the Chat button. |
+| `rocketchat:videoconf/mute` | `{ participantUuid: string, muted: boolean }` | Mutes or unmutes that participant's microphone. |
+| `rocketchat:videoconf/mute-video` | `{ participantUuid: string, muted: boolean }` | Mutes or unmutes that participant's camera. |
+| `rocketchat:videoconf/admit` | `{ participantUuid: string }` | Admits a participant waiting in the lobby (`isWaiting`). |
+| `rocketchat:videoconf/disconnect` | `{ participantUuid: string }` | Removes that participant from the conference. |
+| `rocketchat:videoconf/spotlight` | `{ participantUuid: string, active: boolean }` | Spotlights that participant, or drops the spotlight. |
+| `rocketchat:videoconf/raise-hand` | `{ participantUuid: string, raised: boolean }` | Puts that participant's hand up, or takes it down. |
+| `rocketchat:videoconf/participants-state` | `{ active: boolean }` | Whether the host's people panel is open, which is what the Participants button reflects. |
+
+`mute`, `mute-video` and `raise-hand` are the three things a participant can do to themselves, and Infinity
+takes the participant as optional for exactly those. A request naming the local participant is forwarded with
+the participant left out, which is how Infinity is told the subject is the caller — naming yourself instead
+asks a host to act on a participant, which is a different request and not necessarily one you may make about
+yourself.
+| `rocketchat:videoconf/set-role` | `{ participantUuid: string, role: 'host' \| 'guest' }` | Promotes or demotes that participant. |
+| `rocketchat:videoconf/transfer` | `{ participantUuid: string, alias: string, role?: 'host' \| 'guest', pin?: string }` | Sends that participant to the conference at `alias`. `role` defaults to `guest`, so a transfer never quietly promotes anyone; `pin` is the *target* conference's, omitted when it does not ask for one. |
+| `rocketchat:videoconf/dtmf` | `{ participantUuid: string, digits: string }` | Sends DTMF tones to that participant (a dialed-in endpoint). |
+| `rocketchat:videoconf/mute-all-guests` | `{ muted: boolean }` | Mutes or unmutes every guest at once. |
 | `rocketchat:videoconf/dial-out` | _dial parameters (see below)_ | Dials a destination into the conference via `conference.dialOut`. Replies with `dial-out-success` / `dial-out-error`. |
+
+None of the participant controls reply. The conference answers by *changing*, and the
+change reaches the top window as the next `roster`. A request Pexip refuses is logged
+in the plugin's console and otherwise silent — which is why the top window is expected
+to gate on the `can.*` flags rather than send and hope.
 
 #### `dial-out` parameters
 
@@ -160,6 +188,60 @@ iframe.contentWindow.postMessage({
 > `conference.dialOut` resolves only once the dialed participant actually joins.
 > Hard failures (e.g. an invalid URI) reject and produce `dial-out-error`, but a
 > destination that simply never answers will neither resolve nor error.
+
+---
+
+### Features
+
+`ready` carries the list of features this plugin implements. The top window renders a
+control only for a feature named there, so a plugin for another provider that supports
+less simply announces less, and the host's UI shrinks to fit with nothing new on its
+side.
+
+This plugin announces all of them:
+
+```js
+['chat', 'roster', 'self', 'mute', 'mute-video', 'admit', 'disconnect',
+ 'spotlight', 'raise-hand', 'set-role', 'transfer', 'dtmf', 'mute-all-guests',
+ 'participants']
+```
+
+`chat` covers the toolbar button and the `toggle-chat` / `chat-state` / `chat-unread`
+exchange; `roster` and `self` are the two messages the plugin publishes; the rest each
+name the inbound action of the same name.
+
+### `PluginParticipant`
+
+One entry of the `roster` list.
+
+```ts
+type PluginParticipant = {
+  uuid: string;
+  displayName: string;
+  /** In the lobby, waiting to be admitted. */
+  isWaiting: boolean;
+  isHost: boolean;
+  /** Muted by the conference. */
+  isMuted: boolean;
+  /** Muted in their own client — what their own mic button did. */
+  isClientMuted: boolean;
+  isCameraMuted: boolean;
+  isPresenting: boolean;
+  isSpotlight: boolean;
+  raisedHand: boolean;
+  /** Pexip's per-participant permission flags, passed through unchanged. */
+  can: { control: boolean; mute: boolean; disconnect: boolean; transfer: boolean;
+         spotlight: boolean; fecc: boolean; raiseHand: boolean; changeLayout: boolean };
+};
+```
+
+**Showing a control.** The top window should offer one only when the feature is in
+`ready.features` *and* that participant's own `can.*` flag allows it. Anything else is
+a button whose every press comes back `403`.
+
+`displayName` is whatever Pexip has for the participant, and `''` when it has nothing;
+it is the only identity the plugin publishes. Matching a participant to a user of the
+host application is the host's job, by name.
 
 ---
 
