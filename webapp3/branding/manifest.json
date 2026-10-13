@@ -11,7 +11,8 @@
 	"applicationConfig": {
 		"hiddenFunctionality": [
 			"user-menu-add-participant",
-			"button-chat"
+			"button-chat",
+			"button-participants"
 		]
 	},
 	"defaultUserConfig": {
