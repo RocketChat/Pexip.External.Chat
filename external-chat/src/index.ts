@@ -24,6 +24,7 @@ const FEATURES = [
   'dtmf',
   'mute-all-guests',
   'dial-out',
+  'leave',
 ];
 
 function fireParentMessage(action: string, data?: Record<string, unknown>): void {
@@ -210,11 +211,13 @@ plugin.events.userInitiatedDisconnect.add(() => {
  * conference being told to stop carrying you, not your microphone or camera being switched off.
  */
 let selfUuid: ParticipantID | undefined;
+let isSelfHost = false;
 
 // The local user's own state. The host needs it to know which of its controls are the user's own and which are
 // exercised over somebody else.
 plugin.events.me.add(({ participant }) => {
   selfUuid = participant.uuid;
+  isSelfHost = participant.isHost;
 
   fireParentMessage('self', {
     participantUuid: participant.uuid,
@@ -239,6 +242,76 @@ plugin.events.participantsActivities.add((activities) => {
 
   publishRoster();
 });
+
+/**
+ * The meeting's own Leave button, found by the test id Web App 3's component library gives it.
+ *
+ * Nothing in the plugin API lets a plugin stand between a user and leaving — `userInitiatedDisconnect` arrives once
+ * they are already gone. So the plugin reaches into the page that loaded it instead, which it may do only because
+ * the branding manifest grants it `allow-same-origin`. That makes this tied to the Web App 3 version deployed with
+ * it: if the button is ever renamed, the click goes through untouched and nobody is asked anything.
+ */
+const LEAVE_BUTTON = '[data-testid="button-leave"]';
+
+function getAppWindow(): Window | undefined {
+  try {
+    // Touching the document is what throws when the sandbox keeps us out of it.
+    return window.parent.document !== undefined ? window.parent : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const appWindow = getAppWindow();
+
+// Set while the plugin itself presses Leave, so that the press it was asked for is not stopped all over again.
+let isLeaving = false;
+
+/**
+ * Leaving as the only host can end the meeting for everybody else, so the host is asked to hand over first — but only
+ * when there is anybody to hand over to. Who that should be is the top window's call: it already knows how to make a
+ * participant a host, and it knows the participants as people rather than as names.
+ */
+function mustHandOverBeforeLeaving(): boolean {
+  if (!isSelfHost) {
+    return false;
+  }
+
+  const others = [...roster.values()].filter(({ uuid, isWaiting }) => uuid !== selfUuid && !isWaiting);
+
+  return others.length > 0 && !others.some(({ isHost }) => isHost);
+}
+
+function leave(): void {
+  const button = appWindow?.document.querySelector<HTMLElement>(LEAVE_BUTTON);
+  if (button === null || button === undefined) {
+    console.error('plugin: external-chat could not find the Leave button');
+    return;
+  }
+
+  isLeaving = true;
+  try {
+    button.click();
+  } finally {
+    isLeaving = false;
+  }
+}
+
+if (appWindow === undefined) {
+  console.warn('plugin: external-chat cannot reach the meeting page; the last host will not be asked to hand over');
+} else {
+  // Captured on the window, ahead of everything the page itself listens with, so a stopped click never reaches it.
+  appWindow.addEventListener('click', (event) => {
+    const target = event.target as Element | null;
+    if (isLeaving || target?.closest?.(LEAVE_BUTTON) == null || !mustHandOverBeforeLeaving()) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    fireParentMessage('select-new-host');
+  }, true);
+}
 
 // Listen for the parent window telling us about its chat panel, and asking for the controls we announced.
 window.addEventListener('message', (event: MessageEvent) => {
@@ -356,6 +429,11 @@ window.addEventListener('message', (event: MessageEvent) => {
       request(action, plugin.conference.muteAllGuests({
         mute: data.muted === true,
       }));
+      break;
+    // The host has answered `select-new-host`, having promoted somebody or chosen not to. Either way the user meant
+    // to leave, so the press that was held back is made now.
+    case 'leave':
+      leave();
       break;
   }
 });

@@ -39,7 +39,8 @@
 	"plugins": [
 		{
 			"id": "external-chat",
-			"src": "./plugins/external-chat/index.html"
+			"src": "./plugins/external-chat/index.html",
+			"sandboxValues": ["allow-same-origin"]
 		}
 	]
 }
