@@ -4,6 +4,7 @@ button[data-testid="button-chat"],
 [id*="button-chat"] {
     display: none !important;
 }
+*/
 
 /* Note: The exact class name may vary slightly based on your Pexip version
 .participant-list-footer button.add-participant-btn, 
