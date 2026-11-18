@@ -203,7 +203,7 @@ This plugin announces all of them:
 ```js
 ['chat', 'roster', 'self', 'mute', 'mute-video', 'admit', 'disconnect',
  'spotlight', 'raise-hand', 'set-role', 'transfer', 'dtmf', 'mute-all-guests',
- 'participants']
+ 'participants', 'dial-out']
 ```
 
 `chat` covers the toolbar button and the `toggle-chat` / `chat-state` / `chat-unread`

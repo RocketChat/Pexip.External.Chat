@@ -23,6 +23,7 @@ const FEATURES = [
   'transfer',
   'dtmf',
   'mute-all-guests',
+  'dial-out',
 ];
 
 function fireParentMessage(action: string, data?: Record<string, unknown>): void {
