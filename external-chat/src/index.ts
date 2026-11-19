@@ -25,6 +25,7 @@ const FEATURES = [
   'mute-all-guests',
   'dial-out',
   'leave',
+  'screen-share',
 ];
 
 function fireParentMessage(action: string, data?: Record<string, unknown>): void {
@@ -297,8 +298,52 @@ function leave(): void {
   }
 }
 
+/**
+ * The meeting's own screen-share button, found the same way as Leave and with the same catch: if it is ever renamed,
+ * it stays on the toolbar and the user shares whatever the top window said.
+ */
+const PRESENTATION_BUTTON = '[data-testid="button-start-presentation"]';
+
+// Whether the top window lets this user share their screen. Until it says, they may, so a host that never sends
+// `screen-share` gets the meeting as it always was.
+let isScreenShareAllowed = true;
+
+// Whether a presentation is going out from here right now. The button that starts one is the same one that stops it,
+// and stopping is never held back — not even when the top window took the permission away mid-presentation.
+let isSharingScreen = false;
+
+/**
+ * A stylesheet of our own on the meeting page that hides the button for as long as it is in the document. A rule
+ * rather than a style on the button itself, because the toolbar is re-rendered at will and the button with it.
+ */
+const hidePresentationButton = appWindow?.document.createElement('style');
+if (hidePresentationButton !== undefined) {
+  hidePresentationButton.textContent = `${PRESENTATION_BUTTON} { display: none !important; }`;
+}
+
+// Hidden while sharing is not allowed — except during a presentation, which must keep the button that stops it.
+function renderPresentationButton(): void {
+  if (appWindow === undefined || hidePresentationButton === undefined) {
+    return;
+  }
+
+  if (!isScreenShareAllowed && !isSharingScreen) {
+    appWindow.document.head.append(hidePresentationButton);
+  } else {
+    hidePresentationButton.remove();
+  }
+}
+
+plugin.events.presentationConnectionStateChange.add(({ send }) => {
+  isSharingScreen = send === 'connecting' || send === 'connected';
+  renderPresentationButton();
+});
+
 if (appWindow === undefined) {
-  console.warn('plugin: external-chat cannot reach the meeting page; the last host will not be asked to hand over');
+  console.warn(
+    'plugin: external-chat cannot reach the meeting page; the last host will not be asked to hand over, '
+    + 'and screen sharing will not be restricted',
+  );
 } else {
   // Captured on the window, ahead of everything the page itself listens with, so a stopped click never reaches it.
   appWindow.addEventListener('click', (event) => {
@@ -310,6 +355,23 @@ if (appWindow === undefined) {
     event.preventDefault();
     event.stopImmediatePropagation();
     fireParentMessage('select-new-host');
+  }, true);
+
+  // The button is hidden while sharing is not allowed, so this only matters if it gets pressed anyway — if the page
+  // lost our stylesheet, or something else on it presses the button for the user. Infinity itself would still accept
+  // a presentation from this participant: only the UI is held back.
+  appWindow.addEventListener('click', (event) => {
+    const target = event.target as Element | null;
+    if (isScreenShareAllowed || isSharingScreen || target?.closest?.(PRESENTATION_BUTTON) == null) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    request('screen-share toast', plugin.ui.showToast({
+      message: 'Screen sharing is not available to you in this meeting',
+      isInterrupt: true,
+    }));
   }, true);
 }
 
@@ -434,6 +496,12 @@ window.addEventListener('message', (event: MessageEvent) => {
     // to leave, so the press that was held back is made now.
     case 'leave':
       leave();
+      break;
+    // Whether this user may start sharing their screen, as the top window decides from what it knows about them.
+    // Only the button goes away: Infinity itself would still accept a presentation from this participant.
+    case 'screen-share':
+      isScreenShareAllowed = data.allowed === true;
+      renderPresentationButton();
       break;
   }
 });

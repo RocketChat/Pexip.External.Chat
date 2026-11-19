@@ -150,6 +150,7 @@ yourself.
 | `rocketchat:videoconf/mute-all-guests` | `{ muted: boolean }` | Mutes or unmutes every guest at once. |
 | `rocketchat:videoconf/dial-out` | _dial parameters (see below)_ | Dials a destination into the conference via `conference.dialOut`. Replies with `dial-out-success` / `dial-out-error`. |
 | `rocketchat:videoconf/leave` | _(none)_ | Leaves the call, exactly as pressing the meeting's **Leave** button does. The answer to `select-new-host`. |
+| `rocketchat:videoconf/screen-share` | `{ allowed: boolean }` | Whether the local user may start sharing their screen. See [Restricting screen sharing](#restricting-screen-sharing). |
 
 None of the participant controls reply. The conference answers by *changing*, and the
 change reaches the top window as the next `roster`. A request Pexip refuses is logged
@@ -206,7 +207,7 @@ This plugin announces all of them:
 ```js
 ['chat', 'roster', 'self', 'mute', 'mute-video', 'admit', 'disconnect',
  'spotlight', 'raise-hand', 'set-role', 'transfer', 'dtmf', 'mute-all-guests',
- 'participants', 'dial-out', 'leave']
+ 'participants', 'dial-out', 'leave', 'screen-share']
 ```
 
 `chat` covers the toolbar button and the `toggle-chat` / `chat-state` / `chat-unread`
@@ -234,6 +235,33 @@ That only works because the branding manifest gives the plugin
 `"sandboxValues": ["allow-same-origin"]`, and it ties this feature to the deployed Web App 3
 version. If the plugin can't reach the page, or the button is renamed, Leave works as it always
 did and nobody is asked anything.
+
+### Restricting screen sharing
+
+Screen sharing is allowed until the top window says otherwise. To decide per user, from
+whatever it knows about them, the top window sends `screen-share` once it has seen `ready`, and
+again whenever its answer changes:
+
+```js
+iframe.contentWindow.postMessage({
+  action: 'rocketchat:videoconf/screen-share',
+  allowed: false,
+}, '*');
+```
+
+While sharing isn't allowed, the meeting's own screen-share button is taken off the toolbar. A
+presentation that is already running keeps it, so that it can still be stopped; taking the permission
+away doesn't end it, and the button goes once the presentation does.
+
+This uses the same access to the meeting page as [handing over before leaving](#handing-over-before-leaving):
+the plugin adds a stylesheet of its own to that page hiding `[data-testid="button-start-presentation"]`,
+which needs the same `allow-same-origin` sandbox value and is tied to the deployed Web App 3 version.
+As a backstop, a press of that button that gets through anyway is stopped, with a toast telling the
+user that screen sharing isn't available to them. If the plugin can't reach the page, or the button
+is renamed, screen sharing works as it always did.
+
+> **Note:** Only the button is taken away. Infinity is never told, so this is not a security
+> boundary — a participant who gets a presentation out some other way is not stopped.
 
 ### `PluginParticipant`
 
