@@ -90,6 +90,7 @@ window.addEventListener('message', (event) => {
     case 'rocketchat:videoconf/roster':           /* data.participants */ break;
     case 'rocketchat:videoconf/dial-out-success': /* data.uuid, data.displayName */ break;
     case 'rocketchat:videoconf/dial-out-error':   /* data.message */     break;
+    case 'rocketchat:videoconf/select-new-host':  /* the last host pressed Leave */ break;
   }
 });
 ```
@@ -104,6 +105,7 @@ window.addEventListener('message', (event) => {
 | `rocketchat:videoconf/roster` | `{ participants: PluginParticipant[] }` | Anybody joined, left, or changed. The **whole** list goes out every time — see [PluginParticipant](#pluginparticipant). |
 | `rocketchat:videoconf/dial-out-success` | `{ uuid: string, displayName?: string }` | A `dial-out` request succeeded; the dialed participant joined. |
 | `rocketchat:videoconf/dial-out-error` | `{ message: string }` | A `dial-out` request failed. |
+| `rocketchat:videoconf/select-new-host` | _(none)_ | The only host pressed the meeting's **Leave** button while others are still in the call. The leave was held back — see [Handing over before leaving](#handing-over-before-leaving). |
 
 > **Note:** Clicking the toolbar button only *notifies* the top window via
 > `toggle-chat`. The button's active/tooltip state does **not** change on its own —
@@ -147,6 +149,7 @@ yourself.
 | `rocketchat:videoconf/dtmf` | `{ participantUuid: string, digits: string }` | Sends DTMF tones to that participant (a dialed-in endpoint). |
 | `rocketchat:videoconf/mute-all-guests` | `{ muted: boolean }` | Mutes or unmutes every guest at once. |
 | `rocketchat:videoconf/dial-out` | _dial parameters (see below)_ | Dials a destination into the conference via `conference.dialOut`. Replies with `dial-out-success` / `dial-out-error`. |
+| `rocketchat:videoconf/leave` | _(none)_ | Leaves the call, exactly as pressing the meeting's **Leave** button does. The answer to `select-new-host`. |
 
 None of the participant controls reply. The conference answers by *changing*, and the
 change reaches the top window as the next `roster`. A request Pexip refuses is logged
@@ -203,12 +206,34 @@ This plugin announces all of them:
 ```js
 ['chat', 'roster', 'self', 'mute', 'mute-video', 'admit', 'disconnect',
  'spotlight', 'raise-hand', 'set-role', 'transfer', 'dtmf', 'mute-all-guests',
- 'participants', 'dial-out']
+ 'participants', 'dial-out', 'leave']
 ```
 
 `chat` covers the toolbar button and the `toggle-chat` / `chat-state` / `chat-unread`
 exchange; `roster` and `self` are the two messages the plugin publishes; the rest each
-name the inbound action of the same name.
+name the inbound action of the same name. `leave` also covers the `select-new-host` the
+plugin sends before it.
+
+### Handing over before leaving
+
+When the local user is a host, nobody else in the call is (participants waiting in the lobby
+don't count), and at least one other participant is there, pressing the meeting's own **Leave**
+button doesn't leave. The plugin stops the press and sends `select-new-host` instead, so the top
+window can ask the user to pick a new host:
+
+1. To hand over, the top window sends `set-role` with `role: 'host'` for the chosen participant.
+2. Whether or not anyone was promoted ("leave anyway"), it then sends `leave`. The plugin presses
+   Leave itself, and the call ends the usual way with `disconnected` and `userInitiated: true`.
+3. If the user changes their mind, the top window sends nothing and they stay in the call.
+
+Any other press of Leave goes through untouched.
+
+The plugin API has no hook for this, so the plugin finds the button by the test id Web App 3
+gives it (`[data-testid="button-leave"]`) and listens for its clicks on the meeting page itself.
+That only works because the branding manifest gives the plugin
+`"sandboxValues": ["allow-same-origin"]`, and it ties this feature to the deployed Web App 3
+version. If the plugin can't reach the page, or the button is renamed, Leave works as it always
+did and nobody is asked anything.
 
 ### `PluginParticipant`
 
