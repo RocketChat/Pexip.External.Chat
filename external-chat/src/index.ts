@@ -300,7 +300,7 @@ function leave(): void {
 
 /**
  * The meeting's own screen-share button, found the same way as Leave and with the same catch: if it is ever renamed,
- * the click goes through and the user shares whatever the top window said.
+ * it stays on the toolbar and the user shares whatever the top window said.
  */
 const PRESENTATION_BUTTON = '[data-testid="button-start-presentation"]';
 
@@ -312,8 +312,31 @@ let isScreenShareAllowed = true;
 // and stopping is never held back — not even when the top window took the permission away mid-presentation.
 let isSharingScreen = false;
 
+/**
+ * A stylesheet of our own on the meeting page that hides the button for as long as it is in the document. A rule
+ * rather than a style on the button itself, because the toolbar is re-rendered at will and the button with it.
+ */
+const hidePresentationButton = appWindow?.document.createElement('style');
+if (hidePresentationButton !== undefined) {
+  hidePresentationButton.textContent = `${PRESENTATION_BUTTON} { display: none !important; }`;
+}
+
+// Hidden while sharing is not allowed — except during a presentation, which must keep the button that stops it.
+function renderPresentationButton(): void {
+  if (appWindow === undefined || hidePresentationButton === undefined) {
+    return;
+  }
+
+  if (!isScreenShareAllowed && !isSharingScreen) {
+    appWindow.document.head.append(hidePresentationButton);
+  } else {
+    hidePresentationButton.remove();
+  }
+}
+
 plugin.events.presentationConnectionStateChange.add(({ send }) => {
   isSharingScreen = send === 'connecting' || send === 'connected';
+  renderPresentationButton();
 });
 
 if (appWindow === undefined) {
@@ -334,8 +357,9 @@ if (appWindow === undefined) {
     fireParentMessage('select-new-host');
   }, true);
 
-  // The same, for starting a presentation the top window has not allowed. Only the UI is held back: Infinity itself
-  // would still accept a presentation from this participant.
+  // The button is hidden while sharing is not allowed, so this only matters if it gets pressed anyway — if the page
+  // lost our stylesheet, or something else on it presses the button for the user. Infinity itself would still accept
+  // a presentation from this participant: only the UI is held back.
   appWindow.addEventListener('click', (event) => {
     const target = event.target as Element | null;
     if (isScreenShareAllowed || isSharingScreen || target?.closest?.(PRESENTATION_BUTTON) == null) {
@@ -474,8 +498,10 @@ window.addEventListener('message', (event: MessageEvent) => {
       leave();
       break;
     // Whether this user may start sharing their screen, as the top window decides from what it knows about them.
+    // Only the button goes away: Infinity itself would still accept a presentation from this participant.
     case 'screen-share':
       isScreenShareAllowed = data.allowed === true;
+      renderPresentationButton();
       break;
   }
 });

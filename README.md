@@ -249,16 +249,18 @@ iframe.contentWindow.postMessage({
 }, '*');
 ```
 
-While sharing isn't allowed, pressing the meeting's own screen-share button does nothing except
-show a toast telling the user that screen sharing isn't available to them. A presentation that is
-already running can still be stopped with the same button; taking the permission away doesn't end it.
+While sharing isn't allowed, the meeting's own screen-share button is taken off the toolbar. A
+presentation that is already running keeps it, so that it can still be stopped; taking the permission
+away doesn't end it, and the button goes once the presentation does.
 
-This works the same way as [handing over before leaving](#handing-over-before-leaving): the plugin
-listens for clicks on `[data-testid="button-start-presentation"]` on the meeting page, which needs the
-same `allow-same-origin` sandbox value and is tied to the deployed Web App 3 version. If the plugin
-can't reach the page, or the button is renamed, screen sharing works as it always did.
+This uses the same access to the meeting page as [handing over before leaving](#handing-over-before-leaving):
+the plugin adds a stylesheet of its own to that page hiding `[data-testid="button-start-presentation"]`,
+which needs the same `allow-same-origin` sandbox value and is tied to the deployed Web App 3 version.
+As a backstop, a press of that button that gets through anyway is stopped, with a toast telling the
+user that screen sharing isn't available to them. If the plugin can't reach the page, or the button
+is renamed, screen sharing works as it always did.
 
-> **Note:** Only the button is held back. Infinity is never told, so this is not a security
+> **Note:** Only the button is taken away. Infinity is never told, so this is not a security
 > boundary — a participant who gets a presentation out some other way is not stopped.
 
 ### `PluginParticipant`
