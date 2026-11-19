@@ -25,6 +25,7 @@ const FEATURES = [
   'mute-all-guests',
   'dial-out',
   'leave',
+  'screen-share',
 ];
 
 function fireParentMessage(action: string, data?: Record<string, unknown>): void {
@@ -297,8 +298,29 @@ function leave(): void {
   }
 }
 
+/**
+ * The meeting's own screen-share button, found the same way as Leave and with the same catch: if it is ever renamed,
+ * the click goes through and the user shares whatever the top window said.
+ */
+const PRESENTATION_BUTTON = '[data-testid="button-start-presentation"]';
+
+// Whether the top window lets this user share their screen. Until it says, they may, so a host that never sends
+// `screen-share` gets the meeting as it always was.
+let isScreenShareAllowed = true;
+
+// Whether a presentation is going out from here right now. The button that starts one is the same one that stops it,
+// and stopping is never held back — not even when the top window took the permission away mid-presentation.
+let isSharingScreen = false;
+
+plugin.events.presentationConnectionStateChange.add(({ send }) => {
+  isSharingScreen = send === 'connecting' || send === 'connected';
+});
+
 if (appWindow === undefined) {
-  console.warn('plugin: external-chat cannot reach the meeting page; the last host will not be asked to hand over');
+  console.warn(
+    'plugin: external-chat cannot reach the meeting page; the last host will not be asked to hand over, '
+    + 'and screen sharing will not be restricted',
+  );
 } else {
   // Captured on the window, ahead of everything the page itself listens with, so a stopped click never reaches it.
   appWindow.addEventListener('click', (event) => {
@@ -310,6 +332,22 @@ if (appWindow === undefined) {
     event.preventDefault();
     event.stopImmediatePropagation();
     fireParentMessage('select-new-host');
+  }, true);
+
+  // The same, for starting a presentation the top window has not allowed. Only the UI is held back: Infinity itself
+  // would still accept a presentation from this participant.
+  appWindow.addEventListener('click', (event) => {
+    const target = event.target as Element | null;
+    if (isScreenShareAllowed || isSharingScreen || target?.closest?.(PRESENTATION_BUTTON) == null) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    request('screen-share toast', plugin.ui.showToast({
+      message: 'Screen sharing is not available to you in this meeting',
+      isInterrupt: true,
+    }));
   }, true);
 }
 
@@ -434,6 +472,10 @@ window.addEventListener('message', (event: MessageEvent) => {
     // to leave, so the press that was held back is made now.
     case 'leave':
       leave();
+      break;
+    // Whether this user may start sharing their screen, as the top window decides from what it knows about them.
+    case 'screen-share':
+      isScreenShareAllowed = data.allowed === true;
       break;
   }
 });
