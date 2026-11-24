@@ -321,7 +321,8 @@ Web App 3 URL configured to load the plugin from this dev server. See the
 ### Build (standalone)
 
 ```bash
-npm run build   # outputs to external-chat/dist/
+npm run build                    # outputs to external-chat/dist/ (English)
+PLUGIN_LANG=de npm run build     # same, with German UI strings
 ```
 
 The current version is read from `external-chat/package.json` and is logged by the
@@ -336,7 +337,17 @@ Run all `make` commands from the **repository root**.
 ```bash
 make            # full release: bump the minor version, build, then package
 make package    # build & package using the CURRENT version (no bump)
+make package PLUGIN_LANG=de   # same, with German UI strings
 ```
+
+### Language
+
+The tooltips and toasts the plugin shows are baked into the build in one language, picked with
+`PLUGIN_LANG` (`en` by default, or `de`). The strings live in
+[`external-chat/src/translations.ts`](external-chat/src/translations.ts); to add a language, add a
+dictionary there and list it in `translations` — TypeScript fails the build if it misses a string,
+and an unknown `PLUGIN_LANG` fails it too. The plugin logs its language at startup
+(`plugin: external-chat loaded v<version> (<lang>)`).
 
 ### Targets
 
@@ -345,9 +356,9 @@ make package    # build & package using the CURRENT version (no bump)
 | `make release` | Bumps the version, then runs `package`. | ✅ |
 | `make all` | Alias for `make release` (the default target). | ✅ |
 | `make bump` | Bumps the **minor** version in `external-chat/package.json` (`npm version minor --no-git-tag-version` — no git commit or tag). | ✅ |
-| `make build` | Runs `npm run build`. | — |
+| `make build` | Runs `npm run build` with `PLUGIN_LANG`. | — |
 | `make deploy` | Runs `build`, then copies `external-chat/dist/` into `webapp3/branding/plugins/external-chat/`. | — |
-| `make package` | Runs `deploy`, then zips the `webapp3/` folder into `external-chat-v<version>.zip` at the repo root, using the current `package.json` version. | — |
+| `make package` | Runs `deploy`, then zips the `webapp3/` folder into `external-chat-v<version>.zip` (`-<lang>` is added for any language but English) at the repo root, using the current `package.json` version. Replaces an existing zip of that name. | — |
 | `make clean` | Removes `external-chat/dist/` and the deployed plugin folder. | — |
 
 Dependency chains: `release → bump → package → deploy → build`. Only `release`,
@@ -358,24 +369,26 @@ one, so **CI and one-off packaging never bump** (CI runs `make package`).
 
 `make` produces `external-chat-v<version>.zip` in the repo root, where `<version>`
 is the value in `package.json` (e.g. `external-chat-v1.4.0.zip`) — freshly bumped
-by `make`/`make release`, or unchanged by `make package`. The zip contains the
-full `webapp3/` branding bundle, ready to upload.
+by `make`/`make release`, or unchanged by `make package`. A non-English build adds
+the language: `external-chat-v<version>-de.zip`. The zip contains the full
+`webapp3/` branding bundle, ready to upload.
 
 ## Continuous integration
 
 `.github/workflows/ci.yml` runs on pushes to `main`, on pull requests, and on
 manual dispatch. It installs dependencies (`npm ci`), then runs **lint**,
-**typecheck** (`tsc --noEmit`), and **`make package`** (build + zip, **no version
-bump**). The resulting `external-chat-v<version>.zip` is uploaded as a downloadable
-workflow artifact named `external-chat-v<version>`.
+**typecheck** (`tsc --noEmit`), and **`make package`** for English and German (build +
+zip, **no version bump**). The resulting `external-chat-v<version>.zip` and
+`external-chat-v<version>-de.zip` are uploaded as one downloadable workflow artifact
+named `external-chat-v<version>`.
 
 ## Releasing
 
 `.github/workflows/release.yml` is a **manually triggered** workflow
 (Actions → *Release* → *Run workflow*). It reads the current version from
-`external-chat/package.json`, builds the zip (`make package`, no bump), then
-creates a `v<version>` git tag and a GitHub release with
-`external-chat-v<version>.zip` attached as an asset. Release notes are
+`external-chat/package.json`, builds the English and German zips (`make package`, no
+bump), then creates a `v<version>` git tag and a GitHub release with
+`external-chat-v<version>.zip` and `external-chat-v<version>-de.zip` attached as assets. Release notes are
 auto-generated from the changes since the previous release.
 
 Typical flow:

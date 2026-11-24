@@ -1,6 +1,7 @@
 import { registerPlugin, ParticipantActivities } from '@pexip/plugin-api'
 import type { ButtonRPCPayload, InfinityParticipant, ParticipantID } from '@pexip/plugin-api'
 import { version } from '../package.json'
+import { translations } from './translations'
 
 // The protocol belongs to the page that hosts the chat, not to Pexip, so the namespace is Rocket.Chat's: any
 // provider plugin sending these actions gets the same behaviour out of its call window.
@@ -35,7 +36,9 @@ function fireParentMessage(action: string, data?: Record<string, unknown>): void
   window.top?.postMessage({ action, ...data }, '*');
 }
 
-console.log(`plugin: external-chat loaded v${version}`);
+const t = translations[__PLUGIN_LANG__];
+
+console.log(`plugin: external-chat loaded v${version} (${__PLUGIN_LANG__})`);
 
 let isChatAtive = false;
 let isBadgeVisible = false;
@@ -49,7 +52,7 @@ const plugin = await registerPlugin({
 const chatButtonConfig: ButtonRPCPayload['toolbar']['add'] = {
   position: 'toolbar',
   icon: 'IconChat',
-  tooltip: 'Chat',
+  tooltip: t.chatTooltip,
 };
 
 const chatButton = await plugin.ui.addButton(chatButtonConfig);
@@ -58,7 +61,7 @@ function renderChatButton(): void {
   void chatButton.update({
     ...chatButtonConfig,
     isActive: isChatAtive,
-    tooltip: isChatAtive ? 'Close Chat' : 'Open Chat',
+    tooltip: isChatAtive ? t.closeChat : t.openChat,
     badge: {
       isVisible: isBadgeVisible,
     },
@@ -83,7 +86,7 @@ function setBadgeVisible(isVisible: boolean): void {
 const participantsButtonConfig: ButtonRPCPayload['toolbar']['add'] = {
   position: 'toolbar',
   icon: 'IconGroup',
-  tooltip: 'Participants',
+  tooltip: t.participantsTooltip,
 };
 
 const participantsButton = await plugin.ui.addButton(participantsButtonConfig);
@@ -92,7 +95,7 @@ function renderParticipantsButton(): void {
   void participantsButton.update({
     ...participantsButtonConfig,
     isActive: areParticipantsActive,
-    tooltip: areParticipantsActive ? 'Close Participants' : 'Open Participants',
+    tooltip: areParticipantsActive ? t.closeParticipants : t.openParticipants,
   });
 }
 
@@ -369,7 +372,7 @@ if (appWindow === undefined) {
     event.preventDefault();
     event.stopImmediatePropagation();
     request('screen-share toast', plugin.ui.showToast({
-      message: 'Screen sharing is not available to you in this meeting',
+      message: t.screenShareNotAllowed,
       isInterrupt: true,
     }));
   }, true);

@@ -34,9 +34,10 @@ jobs:
         working-directory: external-chat
         run: npx tsc --noEmit
 
-      - name: Build & package the zip (no version bump)
+      - name: Build & package the zips (no version bump)
         run: |
           make package
+          make package PLUGIN_LANG=de
           VERSION=$(node -p "require('./external-chat/package.json').version")
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
@@ -44,5 +45,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: external-chat-v${{ env.VERSION }}
-          path: external-chat-v${{ env.VERSION }}.zip
+          path: external-chat-v${{ env.VERSION }}*.zip
           if-no-files-found: error
