@@ -151,6 +151,7 @@ yourself.
 | `rocketchat:videoconf/dial-out` | _dial parameters (see below)_ | Dials a destination into the conference via `conference.dialOut`. Replies with `dial-out-success` / `dial-out-error`. |
 | `rocketchat:videoconf/leave` | _(none)_ | Leaves the call, exactly as pressing the meeting's **Leave** button does. The answer to `select-new-host`. |
 | `rocketchat:videoconf/screen-share` | `{ allowed: boolean }` | Whether the local user may start sharing their screen. See [Restricting screen sharing](#restricting-screen-sharing). |
+| `rocketchat:videoconf/refresh-roster` | _(none)_ | Asks Infinity for the conference's participant list and publishes a `roster` built from it. Infinity never tells the plugin when somebody leaves the lobby, so the top window sends this when it learns of a change some other way. |
 
 None of the participant controls reply. The conference answers by *changing*, and the
 change reaches the top window as the next `roster`. A request Pexip refuses is logged
