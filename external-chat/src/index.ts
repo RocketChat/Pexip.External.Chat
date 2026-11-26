@@ -1,5 +1,5 @@
 import { registerPlugin, ParticipantActivities } from '@pexip/plugin-api'
-import type { ButtonRPCPayload, InfinityParticipant, ParticipantID } from '@pexip/plugin-api'
+import type { ButtonRPCPayload, InfinityParticipant, ParticipantID, RoomID } from '@pexip/plugin-api'
 import { version } from '../package.json'
 import { translations } from './translations'
 
@@ -27,6 +27,7 @@ const FEATURES = [
   'dial-out',
   'leave',
   'screen-share',
+  'refresh-roster',
 ];
 
 function fireParentMessage(action: string, data?: Record<string, unknown>): void {
@@ -123,12 +124,36 @@ async function dialOut(params: DialOutParams): Promise<void> {
   }
 }
 
-// Everyone the conference has told us about, by uuid. Activities report only what changed, so the roster the host
-// sees is those changes added up.
-const roster = new Map<ParticipantID, InfinityParticipant>();
-
 // A participant as the protocol describes one: what the host draws, plus the flags it has to gate its controls on.
-function toRosterEntry(participant: InfinityParticipant): Record<string, unknown> {
+interface RosterEntry {
+  uuid: ParticipantID;
+  displayName: string;
+  isWaiting: boolean;
+  isHost: boolean;
+  isMuted: boolean;
+  isClientMuted: boolean;
+  isCameraMuted: boolean;
+  isPresenting: boolean;
+  isSpotlight: boolean;
+  raisedHand: boolean;
+  can: {
+    control: boolean;
+    mute: boolean;
+    disconnect: boolean;
+    transfer: boolean;
+    spotlight: boolean;
+    fecc: boolean;
+    raiseHand: boolean;
+    changeLayout: boolean;
+  };
+}
+
+// Everyone the conference has told us about, by uuid, with the room they are in. Activities report what changed,
+// but nobody leaving the lobby is ever one of them, so the main room is also replaced outright by the conference's
+// own list whenever the lobby may have changed — see `resyncRoster`.
+const roster = new Map<ParticipantID, { roomId: RoomID; entry: RosterEntry }>();
+
+function toRosterEntry(participant: InfinityParticipant): RosterEntry {
   return {
     uuid: participant.uuid,
     displayName: participant.displayName ?? '',
@@ -153,8 +178,87 @@ function toRosterEntry(participant: InfinityParticipant): Record<string, unknown
   };
 }
 
+// The same, from a participant as Infinity's REST API lists one, read the way the client SDK reads the events.
+function fromConferenceList(value: unknown): RosterEntry | undefined {
+  if (value === null || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const participant = value as Record<string, unknown>;
+  if (typeof participant.uuid !== 'string' || participant.uuid === '') {
+    return undefined;
+  }
+
+  const serviceType = participant.service_type;
+  const isChair = participant.role === 'chair';
+  const isGateway = serviceType === 'gateway';
+  const isConference = serviceType === 'conference' || serviceType === 'lecture';
+  const displayName = typeof participant.display_name === 'string' && participant.display_name !== ''
+    ? participant.display_name
+    : typeof participant.uri === 'string' ? participant.uri.replace('sip:', '') : '';
+  const buzzTime = typeof participant.buzz_time === 'number' ? participant.buzz_time : 0;
+  const spotlight = typeof participant.spotlight === 'number' ? participant.spotlight : 0;
+
+  return {
+    uuid: participant.uuid as ParticipantID,
+    displayName,
+    isWaiting: serviceType === 'waiting_room',
+    isHost: isChair,
+    isMuted: participant.is_muted === 'YES',
+    isClientMuted: participant.is_client_muted === true,
+    isCameraMuted: participant.is_video_muted === true,
+    isPresenting: participant.is_presenting === 'YES',
+    isSpotlight: spotlight > 0,
+    raisedHand: buzzTime > 0,
+    can: {
+      control: isConference && isChair,
+      mute: participant.mute_supported === 'YES',
+      disconnect: participant.disconnect_supported === 'YES',
+      transfer: participant.transfer_supported === 'YES',
+      spotlight: !isGateway,
+      fecc: participant.fecc_supported === 'YES',
+      raiseHand: !isGateway,
+      changeLayout: (isConference || isGateway) && isChair,
+    },
+  };
+}
+
 function publishRoster(): void {
-  fireParentMessage('roster', { participants: [...roster.values()].map(toRosterEntry) });
+  fireParentMessage('roster', { participants: [...roster.values()].map(({ entry }) => entry) });
+}
+
+/**
+ * Replaces the main room with the conference's own list of who is in it.
+ *
+ * Infinity says when somebody arrives in the lobby but never when they leave it — turned away, let in by another
+ * host, or hanging up while they wait — and a guest is not told about the lobby at all, so a new host only learns
+ * who is waiting by asking. When to ask is the top window's call, through `refresh-roster`: it hears about the
+ * lobby from the conference's event sink, which this page has no way to.
+ */
+function resyncRoster(): void {
+  void plugin.conference.requestParticipants({}).then(
+    (reply: unknown) => {
+      const result = (reply as { data?: { result?: unknown } } | undefined)?.data?.result;
+      if (!Array.isArray(result)) {
+        return;
+      }
+
+      for (const [uuid, { roomId }] of roster) {
+        if (roomId === 'main') {
+          roster.delete(uuid);
+        }
+      }
+
+      for (const entry of result.flatMap((participant) => fromConferenceList(participant) ?? [])) {
+        roster.set(entry.uuid, { roomId: 'main', entry });
+      }
+
+      publishRoster();
+    },
+    (error: unknown) => {
+      console.error('plugin: external-chat roster request failed', error);
+    },
+  );
 }
 
 // Ask the conference for something on the top window's behalf. The protocol answers none of these directly: the
@@ -189,7 +293,7 @@ participantsButton.onClick.add(() => {
 plugin.events.connected.add(() => {
   fireParentMessage('connected');
   // Ask outright rather than trust that we were listening for the arrival of everyone already in the room.
-  request('roster request', plugin.conference.requestParticipants({}));
+  resyncRoster();
 });
 
 // Fired when the call drops involuntarily (error / server-side disconnect).
@@ -236,11 +340,11 @@ plugin.events.me.add(({ participant }) => {
 // Somebody joined, left, or changed. The whole roster goes out each time: working out what actually changed is the
 // host's business, and it is the half that kept the previous list.
 plugin.events.participantsActivities.add((activities) => {
-  for (const { activity } of activities) {
+  for (const { roomId, activity } of activities) {
     if (activity.type === ParticipantActivities.Leave) {
       roster.delete(activity.participant.uuid);
     } else {
-      roster.set(activity.participant.uuid, activity.participant);
+      roster.set(activity.participant.uuid, { roomId, entry: toRosterEntry(activity.participant) });
     }
   }
 
@@ -281,7 +385,9 @@ function mustHandOverBeforeLeaving(): boolean {
     return false;
   }
 
-  const others = [...roster.values()].filter(({ uuid, isWaiting }) => uuid !== selfUuid && !isWaiting);
+  const others = [...roster.values()]
+    .map(({ entry }) => entry)
+    .filter(({ uuid, isWaiting }) => uuid !== selfUuid && !isWaiting);
 
   return others.length > 0 && !others.some(({ isHost }) => isHost);
 }
@@ -499,6 +605,10 @@ window.addEventListener('message', (event: MessageEvent) => {
     // to leave, so the press that was held back is made now.
     case 'leave':
       leave();
+      break;
+    // The top window heard something about the call that Infinity never tells this page.
+    case 'refresh-roster':
+      resyncRoster();
       break;
     // Whether this user may start sharing their screen, as the top window decides from what it knows about them.
     // Only the button goes away: Infinity itself would still accept a presentation from this participant.
